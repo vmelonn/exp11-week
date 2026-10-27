@@ -95,6 +95,11 @@ def results(mid):
 
 
 def statuses(ids):
+    """Status of each measurement, one API call per 100.
+
+    Completion is judged from downloaded results, never from participant_count: that counts
+    the probes Atlas ASSIGNED, not the results returned. On 27 Oct three measurements showed 8
+    of 8 after 18 s while only 15 of their 24 results existed."""
     out = {}
     ids = list(ids)
     for i in range(0, len(ids), 100):
@@ -148,18 +153,19 @@ def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WI
                 with concurrent.futures.ThreadPoolExecutor(12) as ex:
                     got = dict(zip(ids, ex.map(results, ids)))
                 st = statuses(ids)
+                answered = {m: len(got.get(m) or []) for m in ids}
                 closed = []
                 for m in ids:
                     tag, opened = open_[m]
-                    res = got.get(m) or []
+                    n_ans = answered.get(m, 0)
                     age = time.time() - opened
-                    why = ("complete" if len(res) >= want else
+                    why = ("complete" if n_ans >= want else
                            "final: " + st[m] if st.get(m) in FINAL else
-                           "straggler after %d s, %d of %d" % (STRAGGLER_S, len(res), want)
-                           if res and age > STRAGGLER_S else
+                           "straggler after %d s, %d of %d" % (STRAGGLER_S, n_ans, want)
+                           if n_ans and age > STRAGGLER_S else
                            "abandoned after %d s" % GIVE_UP_S if age > GIVE_UP_S else None)
                     if why:
-                        on_done(tag, m, res, why)
+                        on_done(tag, m, got.get(m) or [], why)
                         del open_[m]
                         if st.get(m) not in FINAL:
                             closed.append(m)

@@ -53,6 +53,14 @@ LOCK_S = 600          # a measurement of this round created this recently means 
 LOCK_STALE_S = 300    # the local lock is touched every poll (15 s); older than this, its runner is gone
 SETTLE_S = 120        # Atlas's filtered listing lags creation; wait this long before firing
 CREDITS_PER_RESULT = 60
+# RIPE Atlas quotas, https://atlas.ripe.net/docs/getting-started/user-defined-measurements.html
+# (read 27 Oct 2026): 100 simultaneous measurements (kept under 80 by atlas_pacing), 100,000
+# results a day, 1,000,000 credits a day by default (this account's ceiling, from the credits
+# API, is 10,000,000), 25 one-off measurements of one type against one target at a time (we
+# never exceed MAX_TRIES = 2). A round is refused if it would take the last 24 hours past
+# LIMIT_SHARE of the daily results or credits.
+RESULTS_PER_DAY = 100000
+LIMIT_SHARE = 0.9
 PKT = datetime.timezone(datetime.timedelta(hours=5), "PKT")   # Pakistan, no daylight saving
 
 
@@ -104,9 +112,11 @@ OPEN = ("Specified", "Scheduled", "Ongoing")
 def done_and_tries(n):
     """Targets already settled for round n, measurements per target, and the newest creation time.
 
-    Settled: a measurement that round has an answer from at least one probe (participant_count,
-    which matches the result count), or is still open and younger than atlas_pacing.GIVE_UP_S,
-    so another runner may yet collect it. Needs one listing call, no result downloads."""
+    Settled: a measurement that round was assigned to at least one probe (participant_count,
+    which counts ASSIGNED probes, not returned results), or is still open and younger than
+    atlas_pacing.GIVE_UP_S. One listing call, no result downloads, which keeps the hourly checks
+    cheap. The cost: a measurement that was assigned but returned nothing is not re-fired; it
+    shows as empty in `fetch`."""
     ms = listing(n)
     t = now().timestamp()
     done, tries = set(), collections.Counter()
@@ -149,8 +159,14 @@ def dryrun():
     print("panel %d targets; probes %s" % (len(c["targets"]), c["probes"]))
     print("connected now: %s%s" % (sorted(up), "" if len(up) == len(c["probes"]) else
                                    "   NOT connected: %s" % sorted(set(c["probes"]) - set(up))))
-    print("cost at most %d credits a round, %d for the week; balance %d. Nothing fired."
-          % (per_round, per_round * c["rounds"], ap.api("credits/")["current_balance"]))
+    cr = ap.api("credits/")
+    per_day = per_round * c.get("rounds_per_day", 1)
+    print("cost at most %d credits a round; %d A DAY against the account's daily ceiling of %d (%s); "
+          "%d for the week" % (per_round, per_day, cr["max_daily_credits"],
+                               "fits" if per_day < cr["max_daily_credits"] else "OVER THE CEILING",
+                               per_round * c["rounds"]))
+    print("results at most %d a day against Atlas's documented 100,000; balance %d. Nothing fired."
+          % (len(c["targets"]) * len(c["probes"]) * c.get("rounds_per_day", 1), cr["current_balance"]))
 
 
 def round_():
@@ -199,7 +215,7 @@ def _round_body(c, n, log):
         log("R%d: work to do; waiting %d s for Atlas's listing to catch up" % (n, SETTLE_S))
         time.sleep(SETTLE_S)
         done, tries, newest = done_and_tries(n)
-        if left(done, tries) and now().timestamp() - newest < LOCK_S:
+        if left(done, tries) and now().timestamp() - newest < c.get("lock_s", LOCK_S):
             log("R%d: a measurement was created %d s ago; a runner may be active elsewhere. Exiting; "
                 "the next trigger carries on." % (n, now().timestamp() - newest))
             return
@@ -215,10 +231,17 @@ def _round_body(c, n, log):
         log("only %d probes connected (%s), fewer than %d; not firing" % (len(up), sorted(up), c["min_probes"]))
         return
     cost = len(todo) * len(up) * CREDITS_PER_RESULT
-    bal = ap.api("credits/")["current_balance"]
-    log("probes connected %s; at most %d credits; balance %d" % (sorted(up), cost, bal))
+    cr = ap.api("credits/")
+    bal, spent, made = cr["current_balance"], cr.get("past_day_credits_spent") or 0, cr.get("past_day_measurement_results") or 0
+    ceiling = cr.get("max_daily_credits") or 1000000
+    log("probes connected %s; at most %d credits and %d results; balance %d; last 24 h %d credits of %d, "
+        "%d results of %d" % (sorted(up), cost, len(todo) * len(up), bal, spent, ceiling, made, RESULTS_PER_DAY))
     if bal < cost:
         log("insufficient credits; not firing")
+        return
+    if spent + cost > LIMIT_SHARE * ceiling or made + len(todo) * len(up) > LIMIT_SHARE * RESULTS_PER_DAY:
+        log("this round would pass %d%% of a daily quota (credits or results); not firing"
+            % (LIMIT_SHARE * 100))
         return
     json.dump(dict(round=n, at=now().strftime("%Y-%m-%dT%H:%M:%SZ"), probes=up),
               io.open(os.path.join(ROUNDS, "R%d" % n, "probes_%s.json" % now().strftime("%Y%m%dT%H%MZ")),
