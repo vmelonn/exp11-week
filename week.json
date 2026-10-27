@@ -3,6 +3,7 @@
  "rounds_dir": "rounds",
  "start_utc": "2026-10-29T05:00Z",
  "days": 7,
+ "rounds_per_day": 2,
  "probes": [
   1016036,
   1016143,
