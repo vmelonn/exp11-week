@@ -1,0 +1,49 @@
+# GitHub Actions workflow for the seven-day rounds. Copied to .github/workflows/week.yml
+# by export_cloud_runner.py, which fills in the CRON lines from week.json; not used from here.
+#
+# Scheduled: `run_week.py round` every hour at five past, on the week's dates only. The runner
+# works out the day itself, exits in seconds when the day is done, and resumes a round another
+# run left unfinished, because Atlas holds the state. The concurrency group stops two runs from
+# overlapping. Manual: Actions tab > this workflow > Run workflow, choosing a step; `dryrun`
+# checks the key, the probes and the schedule and fires nothing.
+#
+# The key comes from the repository secret RIPE_API_KEY, which Rayan adds himself in
+# Settings > Secrets and variables > Actions; it never passes through this code or its logs.
+name: exp11 week round
+
+on:
+  schedule:
+    - cron: "5 * 29,30,31 10 *"
+    - cron: "5 * 1,2,3,4,5 11 *"
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "run_week.py step"
+        type: choice
+        options: [dryrun, status, round]
+        default: dryrun
+
+concurrency:
+  group: exp11-week
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: run_week.py
+        run: python -I run_week.py ${{ github.event_name == 'workflow_dispatch' && inputs.step || 'round' }}
+        env:
+          RIPE_API_KEY: ${{ secrets.RIPE_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rounds-${{ github.run_id }}
+          path: rounds/
+          if-no-files-found: ignore
+          retention-days: 30

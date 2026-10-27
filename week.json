@@ -1,0 +1,22 @@
+{
+ "tag": "exp11 week",
+ "rounds_dir": "rounds",
+ "start_utc": "2026-10-29T05:00Z",
+ "days": 7,
+ "probes": [
+  1016036,
+  1016143,
+  65281,
+  65892,
+  1015679,
+  7812,
+  1001359,
+  7613
+ ],
+ "min_probes": 6,
+ "protocol": "ICMP",
+ "packets": 3,
+ "paris": 1,
+ "window": 30,
+ "panel": "panel.json"
+}
