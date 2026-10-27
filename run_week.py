@@ -3,8 +3,8 @@
 
 ROUNDS. week.json sets the start, the number of days and rounds_per_day. With two a day
 (decided 27 Oct 2026, for a day/night comparison) round R1 starts at start_utc, R2 twelve
-hours later, and so on: R<odd> is the day round, 10:05 Pakistan time, R<even> the night
-round, 22:05. Round n owns the slot from start_utc + (n - 1) x 24 h / rounds_per_day until the
+hours later, and so on. The week starts 27 Oct at 22:00 Pakistan time, so odd rounds are the
+night rounds, 22:05, and even rounds the day rounds, 10:05; labels come from the clock. Round n owns the slot from start_utc + (n - 1) x 24 h / rounds_per_day until the
 next round begins. A runner started anywhere in that slot completes round n; a slot that ends
 with targets unfired leaves its round partial, never back-filled under its own tag, since its
 traces would carry the wrong time. Every result carries its own timestamp.
@@ -142,7 +142,8 @@ def definition(c, n, t):
 
 def when(c, n):
     s = c["start"] + (n - 1) * c["slot"]
-    kind = ("day" if n % 2 else "night") if c.get("rounds_per_day", 1) == 2 else ""
+    h = s.astimezone(PKT).hour
+    kind = ("day" if 6 <= h < 18 else "night") if c.get("rounds_per_day", 1) > 1 else ""
     return "R%-2d %-5s %s UTC, %s Pakistan" % (n, kind, s.strftime("%a %d %b %H:%M"),
                                                s.astimezone(PKT).strftime("%a %H:%M"))
 

@@ -13,8 +13,8 @@ name: exp11 week round
 
 on:
   schedule:
-    - cron: "5 * 29,30,31 10 *"
-    - cron: "5 * 1,2,3,4,5 11 *"
+    - cron: "5 * 27,28,29,30,31 10 *"
+    - cron: "5 * 1,2,3 11 *"
   workflow_dispatch:
     inputs:
       step:
