@@ -48,7 +48,9 @@ ENV = os.path.normpath(os.path.join(HERE, "..", "..", "..", "pkinternet", ".env"
 WINDOW = 30            # our open measurements at once
 CAP_MARGIN = 80        # every open measurement on the account, against the cap of 100
 GIVE_UP_S = 900        # abandon a measurement open this long with no result
-STRAGGLER_S = 420      # close one open this long that has at least one result
+STRAGGLER_S = 240      # stop waiting on one open this long that has at least one result
+                       # (28 Oct: with Falcon offline, waiting 420 s on every measurement
+                       # halved a round's pace; the probes' results normally land within ~70 s)
 POLL_S = 15
 FINAL = {"Stopped", "Failed", "No suitable probes", "Denied", "Forced to stop", "Archived"}
 _ctx = ssl.create_default_context()
@@ -133,21 +135,32 @@ def connected(probe_ids):
     return out
 
 
-def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WINDOW, stop_closed=True):
+def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WINDOW, stop_closed=True,
+               refresh=None, refresh_s=600):
     """Create one-off measurements at the pace the probes can absorb.
 
     definitions   list of (tag, definition dict); one measurement each
     probe_ids     the probes to ask; pass only connected ones (see connected())
     on_created    called (tag, measurement id) as soon as a measurement exists, to checkpoint
     on_done       called (tag, measurement id, results list, why) when a measurement closes
+    refresh       optional; called every refresh_s, returns the probes connected now. New
+                  measurements then ask only those, so a probe that drops out mid-run stops
+                  being waited on. Each measurement keeps the probe count it was created with.
     """
     pending = list(definitions)
-    open_ = {}                                  # id -> (tag, opened at)
-    source = [dict(type="probes", value=",".join(map(str, probe_ids)), requested=len(probe_ids))]
-    want = len(probe_ids)
+    open_ = {}                                  # id -> (tag, opened at, probes asked)
+    probe_ids = sorted(probe_ids)
+    last_refresh = time.time()
     t0 = time.time()
     while pending or open_:
         try:
+            if refresh and pending and time.time() - last_refresh > refresh_s:
+                last_refresh = time.time()
+                now_up = sorted(refresh())
+                if now_up and now_up != probe_ids:
+                    log("  probes connected now %s (were %s)" % (now_up, probe_ids))
+                    probe_ids = now_up
+            source = [dict(type="probes", value=",".join(map(str, probe_ids)), requested=len(probe_ids))]
             if open_:
                 ids = list(open_)
                 with concurrent.futures.ThreadPoolExecutor(12) as ex:
@@ -156,7 +169,7 @@ def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WI
                 answered = {m: len(got.get(m) or []) for m in ids}
                 closed = []
                 for m in ids:
-                    tag, opened = open_[m]
+                    tag, opened, want = open_[m]
                     n_ans = answered.get(m, 0)
                     age = time.time() - opened
                     why = ("complete" if n_ans >= want else
@@ -167,7 +180,9 @@ def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WI
                     if why:
                         on_done(tag, m, got.get(m) or [], why)
                         del open_[m]
-                        if st.get(m) not in FINAL:
+                        # stop only what is complete: a straggler left open can still deliver
+                        # its late probe's result, and Atlas closes it on its own
+                        if why == "complete" and st.get(m) not in FINAL:
                             closed.append(m)
                 if closed and stop_closed:
                     stop(closed)
@@ -179,7 +194,7 @@ def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WI
                     try:
                         created = api("measurements/", payload)["measurements"]
                         for (tag, _), m in zip(batch, created):
-                            open_[m] = (tag, time.time())
+                            open_[m] = (tag, time.time(), len(probe_ids))
                             on_created(tag, m)
                     except urllib.error.HTTPError as e:
                         log("  create refused, HTTP %d %s; will retry" % (e.code, e.read().decode(errors="replace")[:160]))

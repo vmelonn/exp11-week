@@ -255,10 +255,12 @@ def _round_body(c, n, log):
         why[w.split(":")[0].split(" after")[0]] += 1
 
     # fire in slices so a round never spills into the next round's slot
+    # The pacing re-checks which probes are connected every 10 minutes, so a probe that drops
+    # out mid-round stops being waited on (28 Oct: Falcon went offline during R2).
     while todo and now() < end:
         slice_, todo = todo[:500], todo[500:]
         ap.fire_paced([(t, definition(c, n, t)) for t in slice_], sorted(up), lambda t, m: None, on_done,
-                      log=log, window=c["window"])
+                      log=log, window=c["window"], refresh=lambda: list(ap.connected(c["probes"])))
     log("R%d run closed: %s; %d targets not reached before the slot ended" % (n, dict(why), len(todo)))
 
 
