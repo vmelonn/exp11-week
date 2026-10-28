@@ -260,7 +260,8 @@ def _round_body(c, n, log):
     while todo and now() < end:
         slice_, todo = todo[:500], todo[500:]
         ap.fire_paced([(t, definition(c, n, t)) for t in slice_], sorted(up), lambda t, m: None, on_done,
-                      log=log, window=c["window"], refresh=lambda: list(ap.connected(c["probes"])))
+                      log=log, window=c["window"], refresh=lambda: list(ap.connected(c["probes"])),
+                      prune=lambda: done_and_tries(n)[0])
     log("R%d run closed: %s; %d targets not reached before the slot ended" % (n, dict(why), len(todo)))
 
 

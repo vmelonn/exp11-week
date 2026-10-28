@@ -136,7 +136,7 @@ def connected(probe_ids):
 
 
 def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WINDOW, stop_closed=True,
-               refresh=None, refresh_s=600):
+               refresh=None, refresh_s=600, prune=None, prune_s=60):
     """Create one-off measurements at the pace the probes can absorb.
 
     definitions   list of (tag, definition dict); one measurement each
@@ -146,14 +146,25 @@ def fire_paced(definitions, probe_ids, on_created, on_done, log=print, window=WI
     refresh       optional; called every refresh_s, returns the probes connected now. New
                   measurements then ask only those, so a probe that drops out mid-run stops
                   being waited on. Each measurement keeps the probe count it was created with.
+    prune         optional; called every prune_s, returns tags that already have a measurement
+                  (made by anyone). Those leave the queue, so two runners that started together
+                  stop duplicating each other once Atlas's listing catches up (about a minute).
     """
     pending = list(definitions)
     open_ = {}                                  # id -> (tag, opened at, probes asked)
     probe_ids = sorted(probe_ids)
-    last_refresh = time.time()
+    last_refresh = last_prune = time.time()
     t0 = time.time()
     while pending or open_:
         try:
+            if prune and pending and time.time() - last_prune > prune_s:
+                last_prune = time.time()
+                taken = prune()
+                before = len(pending)
+                pending = [(t, d) for t, d in pending if t not in taken]
+                if len(pending) < before:
+                    log("  %d queued targets already have a measurement from another runner; dropped"
+                        % (before - len(pending)))
             if refresh and pending and time.time() - last_refresh > refresh_s:
                 last_refresh = time.time()
                 now_up = sorted(refresh())
