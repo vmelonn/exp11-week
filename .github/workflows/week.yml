@@ -1,7 +1,8 @@
 # GitHub Actions workflow for the seven-day rounds. Copied to .github/workflows/week.yml
 # by export_cloud_runner.py, which fills in the CRON lines from week.json; not used from here.
 #
-# Scheduled: `run_week.py round` every hour at five past, on the week's dates only. The runner
+# Scheduled: `run_week.py round` every 10 minutes at :07, :17 ..., on the week's dates only.
+# GitHub runs schedules best effort and drops many: hourly fired 3 times in 17 hours. The runner
 # works out the day itself, exits in seconds when the day is done, and resumes a round another
 # run left unfinished, because Atlas holds the state. The concurrency group stops two runs from
 # overlapping. Manual: Actions tab > this workflow > Run workflow, choosing a step; `dryrun`
@@ -13,8 +14,8 @@ name: exp11 week round
 
 on:
   schedule:
-    - cron: "5 * 27,28,29,30,31 10 *"
-    - cron: "5 * 1,2,3 11 *"
+    - cron: "7,17,27,37,47,57 * 27,28,29,30,31 10 *"
+    - cron: "7,17,27,37,47,57 * 1,2,3 11 *"
   workflow_dispatch:
     inputs:
       step:
